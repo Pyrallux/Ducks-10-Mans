@@ -134,6 +134,56 @@ mock_match_data = {
     ]
 }
 
+class SignupView(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        self.sign_up_button = Button(label=f"Sign Up ({len(queue)}/10)", style=discord.ButtonStyle.green)
+        self.leave_queue_button = Button(label="Leave Queue", style=discord.ButtonStyle.red)
+        self.add_item(self.sign_up_button)
+        self.add_item(self.leave_queue_button)
+        self.sign_up_button.callback = self.sign_up_callback
+        self.leave_queue_button.callback = self.leave_queue_callback
+
+    async def sign_up_callback(self, interaction: discord.Interaction):
+        global signup_active
+        existing_user = users.find_one({"discord_id": str(interaction.user.id)})
+        if existing_user:
+            if interaction.user.id not in [player["id"] for player in queue]:
+                queue.append({"id": interaction.user.id, "name": interaction.user.name})
+                if interaction.user.id not in player_mmr:
+                    player_mmr[interaction.user.id] = {"mmr": 1000, "wins": 0, "losses": 0}
+                player_names[interaction.user.id] = interaction.user.name
+
+                self.sign_up_button.label = f"Sign Up ({len(queue)}/10)"
+                await interaction.response.edit_message(content="Click a button to manage your queue status!", view=self)
+
+                await interaction.followup.send(
+                    f"{interaction.user.name} added to the queue! Current queue count: {len(queue)}",
+                    ephemeral=True,
+                )
+
+                if len(queue) == 10:
+                    await interaction.channel.send("The queue is now full, proceeding to the voting stage.")
+                    cancel_signup_task()
+                    await start_voting(interaction.channel)
+            else:
+                await interaction.response.send_message("You're already in the queue!", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                "You must link your Riot account to queue. Use `!linkriot Name#Tag` to link your account",
+                ephemeral=True
+            )
+
+    async def leave_queue_callback(self, interaction: discord.Interaction):
+        queue[:] = [player for player in queue if player["id"] != interaction.user.id]
+        self.sign_up_button.label = f"Sign Up ({len(queue)}/10)"
+        await interaction.response.edit_message(content="Click a button to manage your queue status!", view=self)
+
+        await interaction.followup.send(
+            f"{interaction.user.name} removed from the queue! Current queue count: {len(queue)}",
+            ephemeral=True,
+        )
+
 # MongoDB Connection
 uri = "mongodb+srv://x4skinniestduck:8QZOdjPrrgJkRGPX@rapid.12llf.mongodb.net/?retryWrites=true&w=majority&appName=Rapid"
 client = MongoClient(uri, server_api=ServerApi('1'))
@@ -201,7 +251,7 @@ def create_signup_view():
                 if len(queue) == 10:
                     await interaction.channel.send("The queue is now full, proceeding to the voting stage.")
                     cancel_signup_task()
-                    await start_voting(interaction)
+                    await start_voting(interaction.channel)
             else:
                 await interaction.response.send_message("You're already in the queue!", ephemeral=True)
         else:
@@ -229,7 +279,7 @@ def create_signup_view():
 
 # Function to refresh the signup message every minute
 async def refresh_signup_message(ctx):
-    global signup_message, signup_active
+    global signup_message, signup_active, signup_view
 
     try:
         while signup_active:
@@ -241,11 +291,8 @@ async def refresh_signup_message(ctx):
             except discord.NotFound:
                 pass
 
-            # Create new View with buttons
-            view = create_signup_view()
-
             # Send new signup message
-            signup_message = await ctx.send("Click a button to manage your queue status!", view=view)
+            signup_message = await ctx.send("Click a button to manage your queue status!", view=signup_view)
     except asyncio.CancelledError:
         # Task was cancelled
         pass
@@ -524,7 +571,7 @@ async def captains_mode(ctx):
 
     await vote_map(ctx)
 
-async def start_voting(ctx):
+async def start_voting(channel):
     global votes, dummy, match_ongoing
     votes = {"Balanced Teams": 0, "Captains": 0} 
     voters = set() 
@@ -576,28 +623,28 @@ async def start_voting(ctx):
     voting_view.add_item(balanced_button)
     voting_view.add_item(captains_button)
 
-    await ctx.send("Vote for how teams will be decided:", view=voting_view)
+    await channel.send("Vote for how teams will be decided:", view=voting_view)
 
     await asyncio.sleep(15)
 
     # Determine voting results
     if dummy == True:
-        await ctx.send("Balanced Teams wins the vote!")
-        await balanced_teams_logic(ctx)
+        await channel.send("Balanced Teams wins the vote!")
+        await balanced_teams_logic(channel)
     else:
         if votes["Balanced Teams"] > votes["Captains"]:
-            await ctx.send("Balanced Teams wins the vote!")
-            await balanced_teams_logic(ctx)
+            await channel.send("Balanced Teams wins the vote!")
+            await balanced_teams_logic(channel)
         elif votes["Captains"] > votes["Balanced Teams"]:
-            await ctx.send("Captains wins the vote!")
-            await captains_mode(ctx)
+            await channel.send("Captains wins the vote!")
+            await captains_mode(channel)
         else:
             decision = "Balanced Teams" if random.choice([True, False]) else "Captains"
-            await ctx.send(f"It's a tie! Flipping a coin... {decision} wins!")
+            await channel.send(f"It's a tie! Flipping a coin... {decision} wins!")
             if decision == "Balanced Teams":
-                await balanced_teams_logic(ctx) 
+                await balanced_teams_logic(channel) 
             else:
-                await captains_mode(ctx) 
+                await captains_mode(channel) 
     match_ongoing = True
     dummy = False
 
@@ -614,7 +661,7 @@ async def balanced_teams_logic(ctx):
 # Signup Command
 @bot.command()
 async def signup(ctx):
-    global signup_active, team1, team2, signup_message, signup_refresh_task
+    global signup_active, team1, team2, signup_message, signup_refresh_task, signup_view
 
     if signup_active:
         await ctx.send("A signup is already in progress. Please wait for it to complete.")
@@ -625,8 +672,8 @@ async def signup(ctx):
     team1.clear()
     team2.clear()
 
-    view = create_signup_view()
-    signup_message = await ctx.send("Click a button to manage your queue status!", view=view)
+    signup_view = SignupView()
+    signup_message = await ctx.send("Click a button to manage your queue status!", view=signup_view)
 
     # Start the background task to refresh the signup message
     signup_refresh_task = asyncio.create_task(refresh_signup_message(ctx))
@@ -634,7 +681,7 @@ async def signup(ctx):
 # Command to join queue without pressing the button
 @bot.command()
 async def join(ctx):
-    global queue, signup_message, sign_up_button, view, signup_active
+    global queue, signup_message, signup_active, signup_view
 
     if not signup_active:
         await ctx.send("No signup is currently active.")
@@ -648,14 +695,16 @@ async def join(ctx):
                 player_mmr[ctx.author.id] = {"mmr": 1000, "wins": 0, "losses": 0}
             player_names[ctx.author.id] = ctx.author.name
 
-            sign_up_button.label = f"Sign Up ({len(queue)}/10)"
-            await signup_message.edit(content="Click a button to manage your queue status!", view=view)
+            # Update the button label
+            signup_view.sign_up_button.label = f"Sign Up ({len(queue)}/10)"
+            await signup_message.edit(content="Click a button to manage your queue status!", view=signup_view)
 
             await ctx.send(f"{ctx.author.name} added to the queue! Current queue count: {len(queue)}")
 
             if len(queue) == 10:
                 await ctx.send("The queue is now full, proceeding to the voting stage.")
-                await start_voting(ctx)
+                cancel_signup_task()
+                await start_voting(ctx.channel)
                 signup_active = False
         else:
             await ctx.send("You're already in the queue!")
@@ -665,7 +714,7 @@ async def join(ctx):
 # Leave queue command without pressing button
 @bot.command()
 async def leave(ctx):
-    global queue, signup_message, sign_up_button, view, signup_active
+    global queue, signup_message, signup_active, signup_view
 
     if not signup_active:
         await ctx.send("No signup is currently active.")
@@ -673,8 +722,8 @@ async def leave(ctx):
 
     if ctx.author.id in [player["id"] for player in queue]:
         queue[:] = [player for player in queue if player["id"] != ctx.author.id]
-        sign_up_button.label = f"Sign Up ({len(queue)}/10)"
-        await signup_message.edit(content="Click a button to manage your queue status!", view=view)
+        signup_view.sign_up_button.label = f"Sign Up ({len(queue)}/10)"
+        await signup_message.edit(content="Click a button to manage your queue status!", view=signup_view)
         await ctx.send(f"{ctx.author.name} removed from the queue! Current queue count: {len(queue)}")
     else:
         await ctx.send("You're not in the queue.")
@@ -1054,7 +1103,7 @@ async def simulate_queue(ctx):
 
     # Proceed to the voting stage
     await ctx.send("The queue is now full, proceeding to the voting stage.")
-    await start_voting(ctx)
+    await start_voting(ctx.channel)
 
 # Link Riot Account
 @bot.command()
