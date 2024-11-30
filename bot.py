@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import Button, View
+from discord.ui import Button, View, Select
 import random
 import asyncio
 from pymongo.mongo_client import MongoClient
@@ -305,7 +305,7 @@ def cancel_signup_task():
         signup_refresh_task = None
 
 async def vote_map(ctx):
-    global queue, selected_map_name
+    global queue, selected_map_name, team1, team2
 
     # vote between competitive maps or all maps
     map_pool_votes = {"Competitive Maps": 0, "All Maps": 0}
@@ -396,6 +396,49 @@ async def vote_map(ctx):
     winning_map = max(map_votes, key=map_votes.get)
     selected_map_name = winning_map
     await ctx.send(f"The selected map is **{winning_map}**!")
+
+    teams_embed = discord.Embed(
+        title=f"Teams for the match on {winning_map}",
+        description="Good luck to both teams!",
+        color=discord.Color.blue()
+    )
+
+    attackers = []
+    for player in team1:
+        user_data = users.find_one({"discord_id": str(player["id"])})
+        mmr = player_mmr.get(player["id"], {}).get("mmr", 1000)
+        if user_data:
+            riot_name = user_data.get("name", "Unknown")
+            riot_tag = user_data.get("tag", "Unknown")
+            attackers.append(f"{riot_name}#{riot_tag} (MMR: {mmr})")
+        else:
+            attackers.append(f"{player['name']} (MMR: {mmr})")
+
+    defenders = []
+    for player in team2:
+        user_data = users.find_one({"discord_id": str(player["id"])})
+        mmr = player_mmr.get(player["id"], {}).get("mmr", 1000)
+        if user_data:
+            riot_name = user_data.get("name", "Unknown")
+            riot_tag = user_data.get("tag", "Unknown")
+            defenders.append(f"{riot_name}#{riot_tag} (MMR: {mmr})")
+        else:
+            defenders.append(f"{player['name']} (MMR: {mmr})")
+
+    teams_embed.add_field(
+        name="**Attackers:**",
+        value='\n'.join(attackers),
+        inline=False
+    )
+    teams_embed.add_field(
+        name="**Defenders:**",
+        value='\n'.join(defenders),
+        inline=False
+    )
+
+    # Send the finalized teams again, this time in a readable message
+    await ctx.send(embed=teams_embed)
+
     await ctx.send("Start the match, then use !report to finalize results")
 
 # Load data from mongodb
@@ -480,7 +523,7 @@ def balanced_teams(players):
     return team1, team2
 
 async def captains_mode(ctx):
-    global team1, team2, match_ongoing, selected_captain1, selected_captain2
+    global team1, team2, match_ongoing, selected_captain1, selected_captain2, signup_active
 
     captains = []
     if selected_captain1:
@@ -510,66 +553,121 @@ async def captains_mode(ctx):
 
     remaining_players = [p for p in queue if p not in [captain1, captain2]]
 
-    # the correct pick order
+    # The correct pick order
     pick_order = [
-        captain1["name"],  
-        captain2["name"],  
-        captain2["name"],  
-        captain1["name"], 
-        captain1["name"],
-        captain2["name"], 
-        captain2["name"], 
-        captain1["name"],  
+        captain1["id"],  # Use IDs for accurate comparison
+        captain2["id"],
+        captain2["id"],
+        captain1["id"],
+        captain1["id"],
+        captain2["id"],
+        captain2["id"],
+        captain1["id"],
     ]
+
     pick_count = 0
 
-    while remaining_players:
-        current_captain_name = pick_order[pick_count]
-        await ctx.send(f"Remaining players: {', '.join([p['name'] for p in remaining_players])}")
-        await ctx.send(f"{current_captain_name}, it's your turn to pick! Use !pick <player_name>.")
+    await captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count, team1, team2)
 
-        def check(message):
-            return (
-                message.author.name == current_captain_name
-                and message.content.startswith("!pick")
-            )
+async def captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count):
+    global team1, team2, signup_active, match_ongoing, selected_captain1, selected_captain2, queue, votes, selected_map_name
 
-        try:
-            pick_msg = await bot.wait_for("message", check=check, timeout=60)
-            picked_player = pick_msg.content.split(" ", 1)[1]
+    if not remaining_players:
+        # Finalize teams
+        captain1 = captains[0]
+        captain2 = captains[1]
+        await ctx.send(
+            f"**Final Teams:**\n"
+            f"Attackers (Captain: {captain1['name']}): {', '.join([p['name'] for p in team1])}\n"
+            f"Defenders (Captain: {captain2['name']}): {', '.join([p['name'] for p in team2])}"
+        )
+        signup_active = False
+        match_ongoing = True
 
-            player_dict = next((p for p in remaining_players if p["name"] == picked_player), None)
-            if not player_dict:
-                await ctx.send(f"{picked_player} is not available to pick. Choose a valid player.")
-                continue
+        # Reset the selected captains
+        selected_captain1 = None
+        selected_captain2 = None
 
-            # Add the player to the appropriate team
-            if current_captain_name == captain1["name"]:
-                team1.append(player_dict)
-            else:
-                team2.append(player_dict)
+        await vote_map(ctx)
+        return
 
-            remaining_players.remove(player_dict)
-            pick_count += 1
+    current_captain_id = pick_order[pick_count]
+    current_captain = next((c for c in captains if c["id"] == current_captain_id), None)
+    await ctx.send(f"Remaining players: {', '.join([p['name'] for p in remaining_players])}")
+    await ctx.send(f"{current_captain['name']}, it's your turn to pick!")
 
-        except asyncio.TimeoutError:
-            await ctx.send(f"{current_captain_name} took too long to pick. Drafting canceled.")
+    # Create the dropdown menu
+    options = [
+        discord.SelectOption(label=p['name'], value=str(p['id']))
+        for p in remaining_players
+    ]
+
+    select = Select(
+        placeholder="Select a player to pick",
+        options=options,
+    )
+
+    async def select_callback(interaction: discord.Interaction):
+        if interaction.user.id != current_captain_id:
+            await interaction.response.send_message("It's not your turn to pick.", ephemeral=True)
             return
 
-    # Finalize teams
-    await ctx.send(
-        f"**Final Teams:**\n"
-        f"Attackers (Captain: {captain1['name']}): {', '.join([p['name'] for p in team1])}\n"
-        f"Defenders (Captain: {captain2['name']}): {', '.join([p['name'] for p in team2])}"
-    )
-    signup_active = False
-    match_ongoing = True
+        selected_player_id = int(select.values[0])
+        player_dict = next((p for p in remaining_players if p["id"] == selected_player_id), None)
+        if not player_dict:
+            await interaction.response.send_message("Player not available. Please select a valid player.", ephemeral=True)
+            return
 
-    # Reset the selected captains
-    selected_captain1 = None
-    selected_captain2 = None
+        # Add the player to the appropriate team
+        if current_captain_id == captains[0]["id"]:
+            team1.append(player_dict)
+        else:
+            team2.append(player_dict)
 
-    await vote_map(ctx)
+        remaining_players.remove(player_dict)
+        select.disabled = True
+        await interaction.response.edit_message(content=f"{current_captain['name']} picked {player_dict['name']}.", view=None)
+        await interaction.followup.send(f"You picked {player_dict['name']}.", ephemeral=True)
+
+        # Proceed to the next pick
+        await captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count + 1)
+
+    select.callback = select_callback
+
+    view = View()
+    view.add_item(select)
+
+    message = await ctx.send(f"{current_captain['name']}, please pick a player:", view=view)
+
+    # Wait for the captain to make a selection or timeout
+    try:
+        await bot.wait_for(
+            "interaction",
+            check=lambda i: i.data.get('component_type') == 3 and i.user.id == current_captain_id,
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        await ctx.send(f"{current_captain['name']} took too long to pick. Drafting canceled.")
+
+        # Reset variables
+        signup_active = False
+        match_ongoing = False
+        selected_captain1 = None
+        selected_captain2 = None
+        selected_map_name = None
+        votes = {"Balanced Teams": 0, "Captains": 0}
+
+        # Clear teams and queue
+        team1.clear()
+        team2.clear()
+        queue.clear()
+
+        # Cancel any ongoing tasks
+        cancel_signup_task()
+
+        # Reopen signup
+        await signup(ctx)
+        return
 
 async def start_voting(channel):
     global votes, dummy, match_ongoing
