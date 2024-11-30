@@ -158,6 +158,8 @@ sign_up_button = None
 leave_queue_button = None
 view = None
 selected_map_name = None
+selected_captain1 = None
+selected_captain2 = None
 
 # Initialize MongoDB Collections
 db = client["valorant"]  
@@ -350,38 +352,47 @@ def balanced_teams(players):
     return team1, team2
 
 async def captains_mode(ctx):
-    global team1, team2, match_ongoing
+    global team1, team2, match_ongoing, selected_captain1, selected_captain2
 
-    # Get the top 2 players as captains based on their MMR
-    captains = sorted(queue, key=lambda p: player_mmr[p["id"]]["mmr"], reverse=True)[:2]
-    captain1, captain2 = captains
+    captains = []
+    if selected_captain1:
+        captains.append(selected_captain1)
+    if selected_captain2:
+        captains.append(selected_captain2)
+
+    # Fill captains with highest MMR
+    if len(captains) < 2:
+        sorted_players = sorted(queue, key=lambda p: player_mmr[p["id"]]["mmr"], reverse=True)
+        for player in sorted_players:
+            if player not in captains:
+                captains.append(player)
+                if len(captains) == 2:
+                    break
+
+    captain1, captain2 = captains[:2]
 
     await ctx.send(f"**Captains Mode Selected:**\nCaptain 1: {captain1['name']} (MMR: {player_mmr[captain1['id']]['mmr']})\nCaptain 2: {captain2['name']} (MMR: {player_mmr[captain2['id']]['mmr']})")
 
     # Initialize teams with captains
     team1, team2 = [captain1], [captain2]
 
-    # Draft elligibles
-    remaining_players = [p for p in queue if p not in captains]
+    remaining_players = [p for p in queue if p not in [captain1, captain2]]
 
-    # Current captain starts with Captain 1
     current_captain = captain1["name"]
-    pick_count = 0  # to track the number of picks in the snake draft
+    pick_count = 0  
 
     while remaining_players:
-        # Announce whose turn it is
         await ctx.send(f"Remaining players: {', '.join([p['name'] for p in remaining_players])}")
         await ctx.send(f"{current_captain}, it's your turn to pick! Use !pick <player_name>.")
 
         def check(message):
-            # Ensure the message is from the current captain
             return (
                 message.author.name == current_captain
                 and message.content.startswith("!pick")
             )
 
         try:
-            pick_msg = await bot.wait_for("message", check=check, timeout=60)  # 60-second timeout
+            pick_msg = await bot.wait_for("message", check=check, timeout=60) 
             picked_player = pick_msg.content.split(" ", 1)[1]
 
             player_dict = next((p for p in remaining_players if p["name"] == picked_player), None)
@@ -397,14 +408,14 @@ async def captains_mode(ctx):
 
             remaining_players.remove(player_dict)  
 
-            if pick_count == 1:  
+            pick_count += 1
+
+            if pick_count == 1:
                 current_captain = captain2["name"]
-            elif pick_count in [2, 3]: 
+            elif pick_count == 3:
                 current_captain = captain1["name"]
-            elif pick_count in [4, 5]:  
+            elif pick_count == 5:
                 current_captain = captain2["name"]
-            else:
-                pick_count = 0  
 
         except asyncio.TimeoutError:
             await ctx.send(f"{current_captain} took too long to pick. Drafting canceled.")
@@ -414,6 +425,9 @@ async def captains_mode(ctx):
     await ctx.send(f"**Final Teams:**\nAttackers (Captain: {captain1['name']}): {', '.join([p['name'] for p in team1])}\nDefenders (Captain: {captain2['name']}): {', '.join([p['name'] for p in team2])}")
     signup_active = False
     match_ongoing = True
+
+    selected_captain1 = None
+    selected_captain2 = None
 
     await vote_map(ctx)
 
@@ -566,6 +580,7 @@ async def signup(ctx):
     view.add_item(sign_up_button)
     view.add_item(leave_queue_button)
 
+    # Store the message globally
     signup_message = await ctx.send("Click a button to manage your queue status!", view=view)
 
 # Command to join queue without pressing the button
@@ -1019,6 +1034,72 @@ async def unlink(ctx):
     else:
         await ctx.send("Could not find an account linked to you")
 
+
+# Set captain1
+@bot.command()
+@commands.has_role("blood")
+async def setcaptain1(ctx, *, riot_name_tag):
+    global selected_captain1, selected_captain2, queue
+    try:
+        riot_name, riot_tag = riot_name_tag.rsplit("#", 1)
+    except ValueError:
+        await ctx.send("Please provide the Riot ID in the format: `Name#Tag`")
+        return
+
+    # Find the player in the queue with matching Riot name and tag
+    player_in_queue = None
+    for player in queue:
+        user_data = users.find_one({"discord_id": str(player["id"])})
+        if user_data:
+            user_riot_name = user_data.get("name", "").lower()
+            user_riot_tag = user_data.get("tag", "").lower()
+            if user_riot_name == riot_name.lower() and user_riot_tag == riot_tag.lower():
+                player_in_queue = player
+                break
+    if not player_in_queue:
+        await ctx.send(f"{riot_name}#{riot_tag} is not in the queue.")
+        return
+
+    if selected_captain2 and player_in_queue == selected_captain2:
+        await ctx.send(f"{riot_name}#{riot_tag} is already selected as Captain 2.")
+        return
+
+    selected_captain1 = player_in_queue
+    await ctx.send(f"Captain 1 set to {riot_name}#{riot_tag}")
+    
+# Set captain2
+@bot.command()
+@commands.has_role("blood")
+async def setcaptain2(ctx, *, riot_name_tag):
+    global selected_captain1, selected_captain2, queue
+    try:
+        riot_name, riot_tag = riot_name_tag.rsplit("#", 1)
+    except ValueError:
+        await ctx.send("Please provide the Riot ID in the format: `Name#Tag`")
+        return
+
+    # Find the player in the queue with matching Riot name and tag
+    player_in_queue = None
+    for player in queue:
+        user_data = users.find_one({"discord_id": str(player["id"])})
+        if user_data:
+            user_riot_name = user_data.get("name", "").lower()
+            user_riot_tag = user_data.get("tag", "").lower()
+            if user_riot_name == riot_name.lower() and user_riot_tag == riot_tag.lower():
+                player_in_queue = player
+                break
+    if not player_in_queue:
+        await ctx.send(f"{riot_name}#{riot_tag} is not in the queue.")
+        return
+
+    if selected_captain1 and player_in_queue == selected_captain1:
+        await ctx.send(f"{riot_name}#{riot_tag} is already selected as Captain 1.")
+        return
+
+    selected_captain2 = player_in_queue
+    await ctx.send(f"Captain 2 set to {riot_name}#{riot_tag}")
+
+
 # Custom Help Command
 @bot.command()
 async def help(ctx):
@@ -1036,6 +1117,8 @@ async def help(ctx):
     help_embed.add_field(name="!linkriot", value="Link your Riot account using `Name#Tag`.", inline=False)
     help_embed.add_field(name="!unlink", value="Unlink your Riot account.", inline=False)
     help_embed.add_field(name="!join", value="Joins the queue.", inline=False)
+    help_embed.add_field(name="!setcaptain1", value="Set Captain 1 using `Name#Tag` (only accessible by admins)", inline=False)
+    help_embed.add_field(name="!setcaptain2", value="Set Captain 2 using `Name#Tag` (only accessible by admins)", inline=False)
     help_embed.add_field(name="!leave", value="Leaves the queue", inline=False)
     help_embed.add_field(name="!help", value="Display this help menu.", inline=False)
     
