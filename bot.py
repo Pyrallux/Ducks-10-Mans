@@ -1308,7 +1308,6 @@ async def setcaptain2(ctx, *, riot_name_tag):
     selected_captain2 = player_in_queue
     await ctx.send(f"Captain 2 set to {riot_name}#{riot_tag}")
 
-
 # Custom Help Command
 @bot.command()
 async def help(ctx):
@@ -1318,7 +1317,6 @@ async def help(ctx):
         color=discord.Color.blue()
     )
     
-    # Add descriptions for your commands
     help_embed.add_field(name="!signup", value="Start a signup session for matches.", inline=False)
     help_embed.add_field(name="!report", value="Report the most recent match and update MMR.", inline=False)
     help_embed.add_field(name="!stats", value="Check your MMR and match stats.", inline=False)
