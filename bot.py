@@ -484,22 +484,32 @@ load_mmr_data()
 
 # adjust MMR and track wins/losses
 def adjust_mmr(winning_team, losing_team):
-    MMR_GAIN = 25
-    MMR_LOSS = 25
+    MMR_CONSTANT = 32  
+    global player_mmr
 
+    # Calculate average MMR for team1 and 2
+    winning_team_mmr = sum(player_mmr[player["id"]]["mmr"] for player in winning_team) / len(winning_team)
+    losing_team_mmr = sum(player_mmr[player["id"]]["mmr"] for player in losing_team) / len(losing_team)
+
+    # Calculate the expected result of the game
+    expected_win = 1 / (1 + 10 ** ((losing_team_mmr - winning_team_mmr) / 400))
+    expected_loss = 1 / (1 + 10 ** ((winning_team_mmr - losing_team_mmr) / 400))
+
+    # Adjust MMR (winning team)
     for player in winning_team:
         player_id = player["id"]
-        if player_id in player_mmr:
-            player_mmr[player_id]["mmr"] += MMR_GAIN
-            player_mmr[player_id]["wins"] += 1 
+        current_mmr = player_mmr[player_id]["mmr"]
+        new_mmr = current_mmr + MMR_CONSTANT * (1 - expected_win)
+        player_mmr[player_id]["mmr"] = round(new_mmr)
+        player_mmr[player_id]["wins"] += 1
 
+    # Adjust MMR (losing team)
     for player in losing_team:
         player_id = player["id"]
-        if player_id in player_mmr:
-            player_mmr[player_id]["mmr"] -= MMR_LOSS
-            if player_mmr[player_id]["mmr"] < 0:
-                player_mmr[player_id]["mmr"] = 0
-            player_mmr[player_id]["losses"] += 1 
+        current_mmr = player_mmr[player_id]["mmr"]
+        new_mmr = current_mmr + MMR_CONSTANT * (0 - expected_loss)
+        player_mmr[player_id]["mmr"] = max(0, round(new_mmr))  # Ensure MMR doesn't drop below 0
+        player_mmr[player_id]["losses"] += 1
 
     save_mmr_data()
 
@@ -1312,8 +1322,7 @@ async def help(ctx):
     help_embed.add_field(name="!report", value="Report the most recent match and update MMR.", inline=False)
     help_embed.add_field(name="!stats", value="Check your MMR and match stats.", inline=False)
     help_embed.add_field(name="!leaderboard", value="View the MMR leaderboard.", inline=False)
-    help_embed.add_field(name="!linkriot", value="Link your Riot account using `Name#Tag`.", inline=False)
-    help_embed.add_field(name="!unlink", value="Unlink your Riot account.", inline=False)
+    help_embed.add_field(name="!linkriot", value="Link or update your Riot account using `Name#Tag`.", inline=False)
     help_embed.add_field(name="!join", value="Joins the queue.", inline=False)
     help_embed.add_field(name="!setcaptain1", value="Set Captain 1 using `Name#Tag` (only accessible by admins)", inline=False)
     help_embed.add_field(name="!setcaptain2", value="Set Captain 2 using `Name#Tag` (only accessible by admins)", inline=False)
