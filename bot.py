@@ -1309,7 +1309,7 @@ async def setcaptain2(ctx, *, riot_name_tag):
 @commands.has_role("Owner")
 async def cancel(ctx):
     cancel_signup_task()
-    ctx.send("Canceled Signup")
+    await ctx.send("Canceled Signup")
 
 
 # Custom Help Command
