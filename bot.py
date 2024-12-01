@@ -193,7 +193,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# Global variables to track signups and MMR
+# Global variables
 queue = []
 team1 = []  
 team2 = []  
@@ -277,7 +277,7 @@ def create_signup_view():
 
     return view
 
-# Function to refresh the signup message every minute
+# refresh the signup message every minute
 async def refresh_signup_message(ctx):
     global signup_message, signup_active, signup_view
 
@@ -285,7 +285,6 @@ async def refresh_signup_message(ctx):
         while signup_active:
             await asyncio.sleep(60)
 
-            # Delete the old message
             try:
                 await signup_message.delete()
             except discord.NotFound:
@@ -294,10 +293,9 @@ async def refresh_signup_message(ctx):
             # Send new signup message
             signup_message = await ctx.send("Click a button to manage your queue status!", view=signup_view)
     except asyncio.CancelledError:
-        # Task was cancelled
         pass
 
-# Function to cancel the signup refresh task
+# Function to cancel the signup refresh
 def cancel_signup_task():
     global signup_refresh_task
     if signup_refresh_task:
@@ -436,7 +434,7 @@ async def vote_map(ctx):
         inline=False
     )
 
-    # Send the finalized teams again, this time in a readable message
+    # Send the finalized teams again
     await ctx.send(embed=teams_embed)
 
     await ctx.send("Start the match, then use !report to finalize results")
@@ -555,7 +553,7 @@ async def captains_mode(ctx):
 
     # The correct pick order
     pick_order = [
-        captain1["id"],  # Use IDs for accurate comparison
+        captain1["id"],
         captain2["id"],
         captain2["id"],
         captain1["id"],
@@ -596,7 +594,7 @@ async def captains_pick_next(ctx, remaining_players, captains, pick_order, pick_
     await ctx.send(f"Remaining players: {', '.join([p['name'] for p in remaining_players])}")
     await ctx.send(f"{current_captain['name']}, it's your turn to pick!")
 
-    # Create the dropdown menu
+    # Select Menu
     options = [
         discord.SelectOption(label=p['name'], value=str(p['id']))
         for p in remaining_players
@@ -618,7 +616,7 @@ async def captains_pick_next(ctx, remaining_players, captains, pick_order, pick_
             await interaction.response.send_message("Player not available. Please select a valid player.", ephemeral=True)
             return
 
-        # Add the player to the appropriate team
+        # Add the player to the right team
         if current_captain_id == captains[0]["id"]:
             team1.append(player_dict)
         else:
@@ -639,7 +637,7 @@ async def captains_pick_next(ctx, remaining_players, captains, pick_order, pick_
 
     message = await ctx.send(f"{current_captain['name']}, please pick a player:", view=view)
 
-    # Wait for the captain to make a selection or timeout
+    # Wait for the captain to make a selection or time out
     try:
         await bot.wait_for(
             "interaction",
@@ -773,7 +771,7 @@ async def signup(ctx):
     signup_view = SignupView()
     signup_message = await ctx.send("Click a button to manage your queue status!", view=signup_view)
 
-    # Start the background task to refresh the signup message
+    # Refresh the signup message
     signup_refresh_task = asyncio.create_task(refresh_signup_message(ctx))
 
 # Command to join queue without pressing the button
@@ -857,7 +855,6 @@ async def status(ctx):
 async def report(ctx):
     global match_ongoing, queue, team1, team2, selected_map_name
 
-    # Retrieve current_user at the beginning
     current_user = users.find_one({"discord_id": str(ctx.author.id)})
     if not current_user:
         await ctx.send("You need to link your Riot account first using `!linkriot Name#Tag`")
@@ -872,7 +869,7 @@ async def report(ctx):
     response = requests.get(url, headers=headers)
     match_data = response.json()
 
-    # Ensure match_data contains 'data' and it's not empty
+    # Match data must contain the "data" or else it's an error code
     if "data" not in match_data or not match_data["data"]:
         await ctx.send("Could not retrieve match data.")
         return
@@ -881,7 +878,7 @@ async def report(ctx):
     metadata = match.get("metadata", {})
     map_name = metadata.get("map", {}).get("name", "").lower()
 
-    testing_mode = False  # Set to True while testing
+    testing_mode = False  # TRUE WHILE TESTING
 
     if testing_mode:
         match = mock_match_data
@@ -1044,7 +1041,6 @@ def update_stats(player_stats):
     deaths = stats.get("deaths", 0)
     assists = stats.get("assists", 0)
 
-    # Update stats
     if discord_id in player_mmr:
         player_data = player_mmr[discord_id]
         total_matches = player_data.get("matches_played", 0) + 1
@@ -1186,7 +1182,7 @@ async def simulate_queue(ctx):
     team2.clear()
 
     # Add 10 dummy players to the queue
-    queue = [{"id": i, "name": f"Player{i}"} for i in range(1, 11)]  # Use dummy IDs
+    queue = [{"id": i, "name": f"Player{i}"} for i in range(1, 11)] 
 
     # Assign default MMR to the dummy players and map IDs to names
     for player in queue:
@@ -1307,6 +1303,14 @@ async def setcaptain2(ctx, *, riot_name_tag):
 
     selected_captain2 = player_in_queue
     await ctx.send(f"Captain 2 set to {riot_name}#{riot_tag}")
+
+# Stop the signup process, only owner can do this
+@bot.command()
+@commands.has_role("Owner")
+async def cancel(ctx):
+    cancel_signup_task()
+    ctx.send("Canceled Signup")
+
 
 # Custom Help Command
 @bot.command()
