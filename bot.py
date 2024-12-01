@@ -185,7 +185,7 @@ class SignupView(discord.ui.View):
         )
 
 # MongoDB Connection
-uri = "mongodb+srv://x4skinniestduck:8QZOdjPrrgJkRGPX@rapid.12llf.mongodb.net/?retryWrites=true&w=majority&appName=Rapid"
+uri = os.env("uri_key")
 client = MongoClient(uri, server_api=ServerApi('1'))
 
 # Set up bot
