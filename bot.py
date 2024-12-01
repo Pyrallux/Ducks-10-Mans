@@ -567,7 +567,7 @@ async def captains_mode(ctx):
 
     pick_count = 0
 
-    await captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count, team1, team2)
+    await captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count)
 
 async def captains_pick_next(ctx, remaining_players, captains, pick_order, pick_count):
     global team1, team2, signup_active, match_ongoing, selected_captain1, selected_captain2, queue, votes, selected_map_name
