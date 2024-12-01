@@ -1310,6 +1310,7 @@ async def setcaptain2(ctx, *, riot_name_tag):
 async def cancel(ctx):
     cancel_signup_task()
     await ctx.send("Canceled Signup")
+    signup_active = False
 
 
 # Custom Help Command
