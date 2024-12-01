@@ -441,9 +441,8 @@ async def vote_map(ctx):
 
 # Load data from mongodb
 def load_mmr_data():
-    global player_mmr, player_names
+    global player_mmr
     player_mmr = {}
-    player_names = {}
 
     for doc in mmr_collection.find():
         player_id = int(doc['player_id'])
@@ -458,18 +457,26 @@ def load_mmr_data():
             'average_combat_score': doc.get('average_combat_score', 0),
             'kill_death_ratio': doc.get('kill_death_ratio', 0)
         }
-        player_names[player_id] = doc.get('name', '')
 
 # Save mmr
 def save_mmr_data():
     for player_id, stats in player_mmr.items():
+        # Get the Riot name and tag from the users collection
+        user_data = users.find_one({"discord_id": str(player_id)})
+        if user_data:
+            riot_name = user_data.get("name", "Unknown")
+            riot_tag = user_data.get("tag", "Unknown")
+            name = f"{riot_name}#{riot_tag}"
+        else:
+            name = "Unknown"
+
         mmr_collection.update_one(
             {'player_id': player_id},
             {'$set': {
                 'mmr': stats['mmr'],
                 'wins': stats['wins'],
                 'losses': stats['losses'],
-                'name': player_names.get(player_id, ''),
+                'name': name,  # Update name to Riot name
                 'total_combat_score': stats.get('total_combat_score', 0),
                 'total_kills': stats.get('total_kills', 0),
                 'total_deaths': stats.get('total_deaths', 0),
@@ -1126,17 +1133,26 @@ def update_stats(player_stats):
 async def stats(ctx):
     player_id = ctx.author.id  
     if player_id in player_mmr:
-        stats = player_mmr[player_id]
-        mmr_value = stats["mmr"]
-        wins = stats["wins"]
-        losses = stats["losses"]
-        matches_played = stats.get('matches_played', wins + losses)
-        avg_cs = stats.get('average_combat_score', 0)
-        kd_ratio = stats.get('kill_death_ratio', 0)
+        stats_data = player_mmr[player_id]
+        mmr_value = stats_data["mmr"]
+        wins = stats_data["wins"]
+        losses = stats_data["losses"]
+        matches_played = stats_data.get('matches_played', wins + losses)
+        avg_cs = stats_data.get('average_combat_score', 0)
+        kd_ratio = stats_data.get('kill_death_ratio', 0)
         win_percent = (wins / matches_played) * 100 if matches_played > 0 else 0
 
+        # Get Riot name and tag
+        user_data = users.find_one({"discord_id": str(player_id)})
+        if user_data:
+            riot_name = user_data.get("name", "Unknown")
+            riot_tag = user_data.get("tag", "Unknown")
+            player_name = f"{riot_name}#{riot_tag}"
+        else:
+            player_name = ctx.author.name
+
         await ctx.send(
-            f"**{ctx.author.name}'s Stats:**\n"
+            f"**{player_name}'s Stats:**\n"
             f"MMR: {mmr_value}\n"
             f"Wins: {wins}\n"
             f"Losses: {losses}\n"
@@ -1160,7 +1176,15 @@ async def leaderboard(ctx):
 
     leaderboard_entries = []
     for idx, (player_id, stats) in enumerate(sorted_mmr, start=1):
-        name = player_names.get(player_id, "Unknown")
+        # Get the Riot name and tag from the users collection
+        user_data = users.find_one({"discord_id": str(player_id)})
+        if user_data:
+            riot_name = user_data.get("name", "Unknown")
+            riot_tag = user_data.get("tag", "Unknown")
+            name = f"{riot_name}#{riot_tag}"
+        else:
+            name = "Unknown"
+
         mmr_value = stats["mmr"]
         wins = stats["wins"]
         losses = stats["losses"]
