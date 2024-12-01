@@ -1208,37 +1208,23 @@ async def linkriot(ctx, *, riot_input):
         await ctx.send("Please provide your Riot ID in the format: `Name#Tag`")
         return
 
-    existing_user = users.find_one({"discord_id": str(ctx.author.id)})
-    if not existing_user:
-        data = requests.get(f"https://api.henrikdev.xyz/valorant/v1/account/{riot_name}/{riot_tag}", headers=headers)
-        user = data.json()
-        
-        if "data" not in user:
-            await ctx.send("Could not find your Riot account. Please check the name and tag.")
-        else:
-            user_data = {
-                "discord_id": str(ctx.author.id),
-                "name": riot_name,
-                "tag": riot_tag,
-            }
-            users.update_one(
-                {"discord_id": str(ctx.author.id)},
-                {"$set": user_data},
-                upsert=True
-            )
-            await ctx.send(f"Successfully linked {riot_name}#{riot_tag}")
+    data = requests.get(f"https://api.henrikdev.xyz/valorant/v1/account/{riot_name}/{riot_tag}", headers=headers)
+    user = data.json()
+    
+    if "data" not in user:
+        await ctx.send("Could not find your Riot account. Please check the name and tag.")
     else:
-        await ctx.send("Your account is already linked. Use `!unlink` to unlink your account.")
-
-# Unlink Account
-@bot.command()
-async def unlink(ctx):
-    result = users.delete_one({"discord_id": str(ctx.author.id)})
-    if result.deleted_count > 0:
-        await ctx.send("Successfully unlinked your account")
-    else:
-        await ctx.send("Could not find an account linked to you")
-
+        user_data = {
+            "discord_id": str(ctx.author.id),
+            "name": riot_name,
+            "tag": riot_tag,
+        }
+        users.update_one(
+            {"discord_id": str(ctx.author.id)},
+            {"$set": user_data},
+            upsert=True
+        )
+        await ctx.send(f"Successfully linked {riot_name}#{riot_tag} to your Discord account.")
 
 # Set captain1
 @bot.command()
@@ -1336,7 +1322,6 @@ async def help(ctx):
     
     # Send the embedded message
     await ctx.send(embed=help_embed)
-
 
 # Run the bot
 bot.run(bot_token)
