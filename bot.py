@@ -40,7 +40,7 @@ class CustomBot(commands.Bot):
             if user_data:
                 riot_name = user_data.get("name", "Unknown")
                 riot_tag = user_data.get("tag", "Unknown")
-                name = f"{riot_name}#{riot_tag}"
+
             else:
                 name = "Unknown"
 
